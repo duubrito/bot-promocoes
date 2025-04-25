@@ -52,7 +52,7 @@ def extrair_dados(mensagem, data_envio):
         'horario': data_envio.strftime("%H:%M:%S")
     }
 
-client = TelegramClient('session_bot', api_id, api_hash)
+client = TelegramClient('session_name', api_id, api_hash)
 
 @client.on(events.NewMessage(chats=canal))
 async def handler(event):
