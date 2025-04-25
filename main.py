@@ -1,9 +1,14 @@
 import zipfile
-with zipfile.ZipFile("session_bot.zip", 'r') as zip_ref:
+import os
+
+# Deleta qualquer sessão corrompida
+if os.path.exists("session_bot.session"):
+    os.remove("session_bot.session")
+
+with zipfile.ZipFile("session_bot.zip", "r") as zip_ref:
     zip_ref.extractall(".")
 
 import re
-import os
 import json
 import asyncio
 from datetime import datetime
