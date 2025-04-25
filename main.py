@@ -1,3 +1,7 @@
+import zipfile
+with zipfile.ZipFile("session_bot.zip", 'r') as zip_ref:
+    zip_ref.extractall(".")
+
 import re
 import os
 import json
