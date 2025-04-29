@@ -1,4 +1,0 @@
-telethon
-gspread
-oauth2client
-python-dotenv
