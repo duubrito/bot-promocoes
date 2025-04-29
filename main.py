@@ -1,85 +1,72 @@
-import zipfile
-import os
-
-# Deleta qualquer sessão corrompida
-if os.path.exists("session_bot.session"):
-    os.remove("session_bot.session")
-
-with zipfile.ZipFile("session_bot.zip", "r") as zip_ref:
-    zip_ref.extractall(".")
-
-import re
-import json
-import asyncio
-from datetime import datetime
 from telethon import TelegramClient, events
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from dotenv import load_dotenv
+import re
+import os
+from datetime import datetime
 
-load_dotenv()
-
-# --- Configurações Telegram ---
+# --- VARIÁVEIS DE AMBIENTE ---
 api_id = int(os.getenv("API_ID"))
 api_hash = os.getenv("API_HASH")
-canal = "https://t.me/promocoesdodiacanal"
+bot_token = os.getenv("BOT_TOKEN")
+canal = os.getenv("CANAL")  # exemplo: 'https://t.me/seucanal'
+nome_planilha = os.getenv("PLANILHA")  # exemplo: 'PromocoesTelegram'
 
-# --- Configuração do Google Sheets ---
+# --- GOOGLE SHEETS ---
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds_json = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+creds = ServiceAccountCredentials.from_json_keyfile_name("credenciais.json", scope)
 client_sheets = gspread.authorize(creds)
-sheet = client_sheets.open("PromocoesTelegram").sheet1
+sheet = client_sheets.open(nome_planilha).sheet1
 
+# --- FUNÇÕES DE EXTRAÇÃO ---
 def limpar_texto(texto):
-    return re.sub(r'[^\w\s\-.,]', '', texto)
+    return re.sub(r'[^\w\s\-.,:;!?]', '', texto)
 
 def extrair_nome_produto(mensagem):
     linhas = mensagem.split('\n')
-    provaveis = []
-    for linha in linhas:
-        limpa = limpar_texto(linha).strip()
-        if len(limpa.split()) > 2 and "http" not in limpa and "R$" not in limpa and "cupom" not in limpa.lower():
-            provaveis.append(limpa)
-    return max(provaveis, key=len) if provaveis else ""
+    candidatos = [limpar_texto(l).strip() for l in linhas if len(l.split()) > 2 and "http" not in l and "R$" not in l]
+    return max(candidatos, key=len) if candidatos else ""
 
-def extrair_dados(mensagem, data_envio):
-    link = re.search(r'(https?://[^\s]+)', mensagem)
-    preco = re.search(r'R?\$ ?\d+(?:[.,]\d{2})?', mensagem)
-    cupom = re.search(r'[Cc]upom[:\- ]+([A-Z0-9]{4,20})', mensagem)
-    foto = ""  # Pode ser preenchido depois com o download da mídia, se quiser
-    produto = extrair_nome_produto(mensagem)
+def extrair_dados(event):
+    texto = event.message.message or ""
+    produto = extrair_nome_produto(texto)
+    preco = re.search(r'R?\$ ?\d+(?:[.,]\d{2})?', texto)
+    link = re.search(r'(https?://[^\s]+)', texto)
+    cupom = re.search(r'[Cc]upom[:\- ]+([A-Z0-9]{4,20})', texto)
 
+    foto = ""
+    if event.message.photo:
+        foto = f"https://t.me/{event.chat.username}/{event.message.id}"
+
+    agora = datetime.now()
     return {
-        'mensagem': mensagem,
-        'produto': produto,
-        'preco': preco.group() if preco else '',
-        'link': link.group() if link else '',
-        'cupom': cupom.group(1) if cupom else '',
-        'foto': foto,
-        'data': data_envio.strftime("%Y-%m-%d"),
-        'horario': data_envio.strftime("%H:%M:%S")
+        "mensagem": texto,
+        "produto": produto,
+        "preco": preco.group() if preco else "",
+        "link": link.group() if link else "",
+        "cupom": cupom.group(1) if cupom else "",
+        "foto": foto,
+        "data": agora.strftime("%d/%m/%Y"),
+        "hora": agora.strftime("%H:%M")
     }
 
-client = TelegramClient('bot', api_id, api_hash).start(bot_token=os.getenv("BOT_TOKEN"))
+# --- INICIAR CLIENTE ---
+client = TelegramClient("bot", api_id, api_hash).start(bot_token=bot_token)
 
 @client.on(events.NewMessage(chats=canal))
 async def handler(event):
-    texto = event.message.message
-    data_envio = event.message.date.astimezone()
-    dados = extrair_dados(texto, data_envio)
-    print("Nova mensagem recebida:", dados)
+    dados = extrair_dados(event)
+    print("Novo post:", dados)
     sheet.append_row([
-        dados['mensagem'],
-        dados['produto'],
-        dados['preco'],
-        dados['link'],
-        dados['cupom'],
-        dados['foto'],
-        dados['data'],
-        dados['horario']
+        dados["mensagem"],
+        dados["produto"],
+        dados["preco"],
+        dados["link"],
+        dados["cupom"],
+        dados["foto"],
+        dados["data"],
+        dados["hora"]
     ])
 
-print("Bot rodando e aguardando mensagens...")
-with client:
-    client.run_until_disconnected()
+print("Bot rodando e monitorando seu canal...")
+client.run_until_disconnected()
