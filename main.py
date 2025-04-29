@@ -1,62 +1,46 @@
 from telethon import TelegramClient, events
-import requests
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 import re
-import os
-from datetime import datetime
 
-api_id = int(os.getenv("API_ID"))
-api_hash = os.getenv("API_HASH")
-bot_token = os.getenv("BOT_TOKEN")
-canal = os.getenv("CANAL")  # exemplo: @promocoesdodiacanal
+# --- CONFIGURAÇÕES DO TELEGRAM ---
+api_id = 27143574
+api_hash = "62ab5efd67204a932d8d5ef92be9161a"
+canal = "https://t.me/oqcomprei"
 
-spreadsheet_id = os.getenv("PLANILHA_ID")
-access_token = os.getenv("GOOGLE_ACCESS_TOKEN")
+# --- CONFIGURAÇÕES DO GOOGLE SHEETS ---
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("credenciais.json", scope)
+client_sheets = gspread.authorize(creds)
+sheet = client_sheets.open("PromocoesTelegram").sheet1
 
-headers = {
-    "Authorization": f"Bearer {access_token}",
-    "Content-Type": "application/json"
-}
+# --- FUNÇÃO PARA EXTRAIR DADOS DA MENSAGEM ---
+def extrair_dados(mensagem):
+    link = re.search(r'(https?://[^\s]+)', mensagem)
+    preco = re.search(r'R?\$ ?\d+(?:[.,]\d{2})?', mensagem)
+    produto = mensagem.split('\n')[0] if '\n' in mensagem else mensagem[:50]
+    return {
+        'mensagem': mensagem,
+        'produto': produto,
+        'preco': preco.group() if preco else '',
+        'link': link.group() if link else ''
+    }
 
-def limpar_texto(texto):
-    return re.sub(r'[^\w\s\-.,:;!?]', '', texto)
-
-def extrair_nome_produto(mensagem):
-    linhas = mensagem.split('\n')
-    candidatos = [limpar_texto(l).strip() for l in linhas if len(l.split()) > 2 and "http" not in l and "R$" not in l]
-    return max(candidatos, key=len) if candidatos else ""
-
-def extrair_dados(event):
-    texto = event.message.message or ""
-    produto = extrair_nome_produto(texto)
-    preco = re.search(r'R?\$ ?\d+(?:[.,]\d{2})?', texto)
-    link = re.search(r'(https?://[^\s]+)', texto)
-    cupom = re.search(r'[Cc]upom[:\- ]+([A-Z0-9]{4,20})', texto)
-    foto = f"https://t.me/{event.chat.username}/{event.message.id}" if event.message.photo else ""
-    agora = datetime.now()
-    return [
-        texto,
-        produto,
-        preco.group() if preco else "",
-        link.group() if link else "",
-        cupom.group(1) if cupom else "",
-        foto,
-        agora.strftime("%d/%m/%Y"),
-        agora.strftime("%H:%M")
-    ]
-
-def enviar_para_planilha(valores):
-    url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/A1:append?valueInputOption=USER_ENTERED"
-    body = { "values": [valores] }
-    response = requests.post(url, headers=headers, json=body)
-    print("Resposta Google Sheets:", response.status_code, response.text)
-
-client = TelegramClient("bot", api_id, api_hash).start(bot_token=bot_token)
+# --- CLIENTE TELEGRAM ---
+client = TelegramClient('session_name', api_id, api_hash)
 
 @client.on(events.NewMessage(chats=canal))
 async def handler(event):
-    dados = extrair_dados(event)
-    print("Novo post:", dados)
-    enviar_para_planilha(dados)
+    texto = event.message.message
+    if texto:
+        dados = extrair_dados(texto)
+        print("Nova mensagem recebida:", dados)
+        try:
+            sheet.append_row([dados['mensagem'], dados['produto'], dados['preco'], dados['link']])
+            print("Mensagem salva na planilha.")
+        except Exception as e:
+            print("Erro ao salvar na planilha:", e)
 
-print("Bot rodando e monitorando canal...")
+print("Aguardando mensagens novas do canal...")
+client.start()
 client.run_until_disconnected()
